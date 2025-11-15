@@ -1,0 +1,177 @@
+{
+  "dashboard": {
+    "title": "DeltaList PoC Comparison Dashboard",
+    "tags": ["deltalist", "poc"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Active Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "active_connections{app=\"grpc-backend\"}",
+            "legendFormat": "gRPC - {{kubernetes_pod_name}}"
+          },
+          {
+            "expr": "sum(emqx_connections_count)",
+            "legendFormat": "MQTT (EMQX)"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 2,
+        "title": "Messages In/Out per Second",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(messages_in_total{app=\"grpc-backend\"}[1m])",
+            "legendFormat": "gRPC In - {{kubernetes_pod_name}}"
+          },
+          {
+            "expr": "rate(messages_out_total{app=\"grpc-backend\"}[1m])",
+            "legendFormat": "gRPC Out - {{kubernetes_pod_name}}"
+          },
+          {
+            "expr": "rate(messages_in_total{app=\"mqtt-backend\"}[1m])",
+            "legendFormat": "MQTT In - {{kubernetes_pod_name}}"
+          },
+          {
+            "expr": "rate(messages_out_total{app=\"mqtt-backend\"}[1m])",
+            "legendFormat": "MQTT Out - {{kubernetes_pod_name}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 3,
+        "title": "Message Latency (p50, p95, p99)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(message_latency_ms_bucket{app=\"grpc-backend\"}[5m]))",
+            "legendFormat": "gRPC p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(message_latency_ms_bucket{app=\"grpc-backend\"}[5m]))",
+            "legendFormat": "gRPC p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(message_latency_ms_bucket{app=\"grpc-backend\"}[5m]))",
+            "legendFormat": "gRPC p99"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(message_latency_ms_bucket{app=\"mqtt-backend\"}[5m]))",
+            "legendFormat": "MQTT p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(message_latency_ms_bucket{app=\"mqtt-backend\"}[5m]))",
+            "legendFormat": "MQTT p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(message_latency_ms_bucket{app=\"mqtt-backend\"}[5m]))",
+            "legendFormat": "MQTT p99"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 4,
+        "title": "Blacklist Delivery Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(blacklist_delivery_latency_ms_bucket{app=\"grpc-backend\"}[5m]))",
+            "legendFormat": "gRPC p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(blacklist_delivery_latency_ms_bucket{app=\"grpc-backend\"}[5m]))",
+            "legendFormat": "gRPC p95"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(blacklist_delivery_latency_ms_bucket{app=\"mqtt-backend\"}[5m]))",
+            "legendFormat": "MQTT p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(blacklist_delivery_latency_ms_bucket{app=\"mqtt-backend\"}[5m]))",
+            "legendFormat": "MQTT p95"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 5,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"deltalist\",pod=~\"grpc-backend.*\"}[1m])) by (pod)",
+            "legendFormat": "gRPC - {{pod}}"
+          },
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"deltalist\",pod=~\"mqtt-backend.*\"}[1m])) by (pod)",
+            "legendFormat": "MQTT - {{pod}}"
+          },
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"deltalist\",pod=~\"emqx.*\"}[1m])) by (pod)",
+            "legendFormat": "EMQX - {{pod}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8}
+      },
+      {
+        "id": 6,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(container_memory_working_set_bytes{namespace=\"deltalist\",pod=~\"grpc-backend.*\"}) by (pod)",
+            "legendFormat": "gRPC - {{pod}}"
+          },
+          {
+            "expr": "sum(container_memory_working_set_bytes{namespace=\"deltalist\",pod=~\"mqtt-backend.*\"}) by (pod)",
+            "legendFormat": "MQTT - {{pod}}"
+          },
+          {
+            "expr": "sum(container_memory_working_set_bytes{namespace=\"deltalist\",pod=~\"emqx.*\"}) by (pod)",
+            "legendFormat": "EMQX - {{pod}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8}
+      },
+      {
+        "id": 7,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(errors_total{app=\"grpc-backend\"}[1m])) by (type)",
+            "legendFormat": "gRPC - {{type}}"
+          },
+          {
+            "expr": "sum(rate(errors_total{app=\"mqtt-backend\"}[1m])) by (type)",
+            "legendFormat": "MQTT - {{type}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8}
+      },
+      {
+        "id": 8,
+        "title": "Reconnection Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(reconnects_total{app=\"grpc-backend\"}[1m])",
+            "legendFormat": "gRPC - {{kubernetes_pod_name}}"
+          },
+          {
+            "expr": "rate(reconnects_total{app=\"mqtt-backend\"}[1m])",
+            "legendFormat": "MQTT - {{kubernetes_pod_name}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8}
+      }
+    ]
+  }
+}

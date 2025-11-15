@@ -1,0 +1,183 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  ACR_NAME: 'deltalistacr'  # Override via repository secret
+  AKS_CLUSTER: 'deltalist-aks'
+  AKS_RESOURCE_GROUP: 'deltalist-rg'
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build solution
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run tests
+      run: dotnet test --configuration Release --no-build --verbosity normal
+
+  build-grpc-backend:
+    name: Build gRPC Backend Image
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build and push to ACR
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build Docker image
+      run: |
+        docker build -f src/GrpcBackend/Dockerfile \
+          -t ${{ secrets.ACR_LOGIN_SERVER }}/grpc-backend:${{ github.sha }} \
+          -t ${{ secrets.ACR_LOGIN_SERVER }}/grpc-backend:latest \
+          .
+
+    - name: Push Docker image
+      run: |
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/grpc-backend:${{ github.sha }}
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/grpc-backend:latest
+
+  build-mqtt-backend:
+    name: Build MQTT Backend Image
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build and push to ACR
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build Docker image
+      run: |
+        docker build -f src/MqttBackend/Dockerfile \
+          -t ${{ secrets.ACR_LOGIN_SERVER }}/mqtt-backend:${{ github.sha }} \
+          -t ${{ secrets.ACR_LOGIN_SERVER }}/mqtt-backend:latest \
+          .
+
+    - name: Push Docker image
+      run: |
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/mqtt-backend:${{ github.sha }}
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/mqtt-backend:latest
+
+  deploy-grpc:
+    name: Deploy gRPC PoC to AKS
+    needs: build-grpc-backend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set AKS context
+      uses: azure/aks-set-context@v3
+      with:
+        resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+        cluster-name: ${{ env.AKS_CLUSTER }}
+
+    - name: Deploy to AKS
+      run: |
+        export ACR_NAME="${{ secrets.ACR_LOGIN_SERVER }}"
+        export IMAGE_TAG="${{ github.sha }}"
+
+        # Create namespace if not exists
+        kubectl create namespace deltalist --dry-run=client -o yaml | kubectl apply -f -
+
+        # Apply manifests
+        envsubst < deployment/kubernetes/grpc/namespace.yaml | kubectl apply -f -
+        envsubst < deployment/kubernetes/grpc/redis.yaml | kubectl apply -f -
+        envsubst < deployment/kubernetes/grpc/deployment.yaml | kubectl apply -f -
+
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/grpc-backend -n deltalist --timeout=5m
+
+  deploy-mqtt:
+    name: Deploy MQTT PoC to AKS
+    needs: build-mqtt-backend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set AKS context
+      uses: azure/aks-set-context@v3
+      with:
+        resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+        cluster-name: ${{ env.AKS_CLUSTER }}
+
+    - name: Deploy to AKS
+      run: |
+        export ACR_NAME="${{ secrets.ACR_LOGIN_SERVER }}"
+        export IMAGE_TAG="${{ github.sha }}"
+
+        # Create namespace if not exists
+        kubectl create namespace deltalist --dry-run=client -o yaml | kubectl apply -f -
+
+        # Apply manifests
+        kubectl apply -f deployment/kubernetes/grpc/redis.yaml
+        kubectl apply -f deployment/kubernetes/mqtt/emqx-deployment.yaml
+        envsubst < deployment/kubernetes/mqtt/mqtt-backend-deployment.yaml | kubectl apply -f -
+
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/mqtt-backend -n deltalist --timeout=5m
+        kubectl rollout status statefulset/emqx -n deltalist --timeout=5m

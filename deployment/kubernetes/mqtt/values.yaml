@@ -1,0 +1,52 @@
+# Helm values for MQTT PoC deployment
+# Can be used with helm install or with envsubst for kubectl
+
+namespace: deltalist
+
+emqx:
+  replicas: 3
+  image: emqx/emqx:5.3.2
+  maxConnections: 100000
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  storage:
+    size: 20Gi
+    storageClass: managed-premium
+
+mqttBackend:
+  replicas: 3
+  image:
+    repository: ${ACR_NAME}.azurecr.io/mqtt-backend
+    tag: ${IMAGE_TAG}
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPU: 70
+    targetMemory: 80
+
+redis:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  storage:
+    size: 10Gi
+    storageClass: managed-premium

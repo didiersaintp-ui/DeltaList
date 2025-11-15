@@ -1,0 +1,26 @@
+# Example terraform.tfvars file
+# Copy to terraform.tfvars and customize
+
+environment         = "dev"
+prefix              = "deltalist"
+resource_group_name = "deltalist-dev-rg"
+location            = "westeurope"
+kubernetes_version  = "1.28"
+
+# Initial node configuration
+node_count     = 3
+min_node_count = 3
+max_node_count = 10
+node_vm_size   = "Standard_D4s_v3"
+
+# For load testing with 30k devices, consider:
+# node_vm_size   = "Standard_D8s_v3"
+# max_node_count = 20
+
+common_tags = {
+  Project     = "DeltaList"
+  Environment = "Development"
+  ManagedBy   = "Terraform"
+  CostCenter  = "R&D"
+  Owner       = "Platform Team"
+}

@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: deltalist-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - deltalist
+
+  grpc-backend:
+    build:
+      context: .
+      dockerfile: src/GrpcBackend/Dockerfile
+    container_name: deltalist-grpc-backend
+    ports:
+      - "5001:5001"  # gRPC
+      - "9090:9090"  # Metrics
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Backend__Redis__ConnectionString=redis:6379
+      - Backend__Security__SecretKey=local_dev_secret_key_change_me
+      - Backend__Security__Salt=local_dev_salt_change_me
+    depends_on:
+      - redis
+    networks:
+      - deltalist
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: deltalist-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./deployment/kubernetes/monitoring/prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - deltalist
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: deltalist-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - deltalist
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  deltalist:
+    driver: bridge

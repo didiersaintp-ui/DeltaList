@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+option csharp_namespace = "DeltaList.Shared.Services";
+
+package deltalist;
+
+import "messages.proto";
+
+// ========================================
+// gRPC Service Definitions
+// ========================================
+
+// Bidirectional streaming service for device communication
+service DeviceStreamService {
+  // Main bidirectional streaming RPC
+  // Device sends batches, heartbeats, acks
+  // Server sends blacklist deltas, commands, acks
+  rpc Connect(stream DeviceMessage) returns (stream ServerMessage);
+}
+
+// Device registration and authentication service
+service DeviceAuthService {
+  // Register a new device and get auth token
+  rpc RegisterDevice(DeviceRegistration) returns (AuthToken);
+
+  // Refresh an existing auth token
+  rpc RefreshToken(AuthToken) returns (AuthToken);
+}
+
+// Admin API for blacklist management
+service BlacklistAdminService {
+  // Add PAN tokens to blacklist
+  rpc AddToBlacklist(BlacklistUpdateRequest) returns (BlacklistUpdateResponse);
+
+  // Remove PAN tokens from blacklist
+  rpc RemoveFromBlacklist(BlacklistUpdateRequest) returns (BlacklistUpdateResponse);
+
+  // Get current blacklist state
+  rpc GetBlacklist(BlacklistQuery) returns (BlacklistSnapshot);
+}
+
+// ========================================
+// Admin API message structures
+// ========================================
+
+message BlacklistUpdateRequest {
+  repeated string pan_tokens = 1; // Tokenized/hashed PAN identifiers
+  string reason = 2;
+  string updated_by = 3;
+  int32 shard_id = 4; // Optional: target specific device shard
+}
+
+message BlacklistUpdateResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 delta_seq_no = 3; // Sequence number of created delta
+  int32 devices_notified = 4;
+}
+
+message BlacklistQuery {
+  int32 shard_id = 1; // -1 for all shards
+  uint64 since_seq_no = 2; // Get deltas since this sequence
+}
+
+message BlacklistSnapshot {
+  repeated string pan_tokens = 1;
+  uint64 current_seq_no = 2;
+  int64 timestamp_utc = 3;
+}

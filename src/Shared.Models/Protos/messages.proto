@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+option csharp_namespace = "DeltaList.Shared.Messages";
+
+package deltalist;
+
+// ========================================
+// Common message structures
+// ========================================
+
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+
+// ========================================
+// Device -> Backend: Event messages
+// ========================================
+
+message Event {
+  string device_id = 1;
+  int64 device_timestamp_utc = 2; // Unix timestamp in milliseconds
+  string event_type = 3;
+  repeated KeyValue attributes = 4;
+  string transaction_id = 5; // Optional: for tracing
+}
+
+message Batch {
+  string device_id = 1;
+  int64 batch_timestamp_utc = 2; // Unix timestamp in milliseconds
+  uint32 batch_seq = 3; // Sequence number for ordering
+  repeated Event events = 4;
+  string signature = 5; // HMAC signature for integrity
+}
+
+// ========================================
+// Backend -> Device: Blacklist deltas
+// ========================================
+
+message BlacklistDelta {
+  string delta_id = 1; // UUID
+  uint64 seq_no = 2; // Global sequence number
+  int64 timestamp_utc = 3; // Unix timestamp in milliseconds
+  repeated string added = 4; // Tokenized/hashed PAN identifiers to add
+  repeated string removed = 5; // Tokenized/hashed PAN identifiers to remove
+  string signature = 6; // HMAC signature for integrity
+  int32 shard_id = 7; // Optional: for sharding devices
+}
+
+// ========================================
+// Control messages
+// ========================================
+
+message Heartbeat {
+  string device_id = 1;
+  int64 timestamp_utc = 2;
+}
+
+message Ack {
+  string message_id = 1; // ID of message being acknowledged
+  string ack_type = 2; // "batch", "delta", etc.
+  bool success = 3;
+  string error_message = 4; // If success = false
+}
+
+message Command {
+  string command_id = 1;
+  string command_type = 2; // "reconnect", "update_config", etc.
+  repeated KeyValue parameters = 3;
+}
+
+// ========================================
+// gRPC streaming message wrappers
+// ========================================
+
+message DeviceMessage {
+  oneof payload {
+    Batch batch = 1;
+    Heartbeat heartbeat = 2;
+    Ack ack = 3;
+  }
+}
+
+message ServerMessage {
+  oneof payload {
+    BlacklistDelta delta = 1;
+    Command command = 2;
+    Ack ack = 3; // Server acknowledging batch receipt
+  }
+}
+
+// ========================================
+// Authentication & Registration
+// ========================================
+
+message DeviceRegistration {
+  string device_id = 1;
+  string public_key = 2; // For mTLS or key-based auth
+  repeated KeyValue metadata = 3;
+}
+
+message AuthToken {
+  string device_id = 1;
+  string token = 2; // JWT token
+  int64 expires_at_utc = 3;
+}

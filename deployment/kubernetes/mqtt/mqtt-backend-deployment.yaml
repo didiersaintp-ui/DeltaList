@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-backend
+  namespace: deltalist
+  labels:
+    app: mqtt-backend
+    poc: poc-b
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mqtt-backend
+  template:
+    metadata:
+      labels:
+        app: mqtt-backend
+        poc: poc-b
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: mqtt-backend
+        image: ${ACR_NAME}.azurecr.io/mqtt-backend:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Production"
+        - name: ASPNETCORE_URLS
+          value: "http://+:8080"
+        - name: Backend__Environment
+          value: "Production"
+        - name: Backend__Mqtt__BrokerHost
+          value: "emqx"
+        - name: Backend__Mqtt__BrokerPort
+          value: "1883"
+        - name: Backend__Redis__ConnectionString
+          valueFrom:
+            secretKeyRef:
+              name: deltalist-secrets
+              key: redis-connection-string
+        - name: Backend__Security__SecretKey
+          valueFrom:
+            secretKeyRef:
+              name: deltalist-secrets
+              key: security-secret-key
+        - name: Backend__Security__Salt
+          valueFrom:
+            secretKeyRef:
+              name: deltalist-secrets
+              key: security-salt
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      imagePullSecrets:
+      - name: acr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-backend
+  namespace: deltalist
+  labels:
+    app: mqtt-backend
+spec:
+  type: LoadBalancer
+  selector:
+    app: mqtt-backend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mqtt-backend-hpa
+  namespace: deltalist
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mqtt-backend
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

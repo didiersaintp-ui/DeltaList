@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deltalist
+  labels:
+    name: deltalist
+    environment: production
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: deltalist-secrets
+  namespace: deltalist
+type: Opaque
+stringData:
+  redis-connection-string: "redis:6379"
+  security-secret-key: "CHANGE_THIS_IN_PRODUCTION_USE_KEYVAULT"
+  security-salt: "CHANGE_THIS_IN_PRODUCTION_USE_KEYVAULT"

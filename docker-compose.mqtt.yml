@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: deltalist-redis-mqtt
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - deltalist
+
+  emqx:
+    image: emqx/emqx:5.3.2
+    container_name: deltalist-emqx
+    ports:
+      - "1883:1883"    # MQTT
+      - "8083:8083"    # WebSocket
+      - "8084:8084"    # WSS
+      - "8883:8883"    # MQTTS
+      - "18083:18083"  # Dashboard
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=127.0.0.1
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=public
+      - EMQX_LISTENERS__TCP__DEFAULT__MAX_CONNECTIONS=100000
+    volumes:
+      - emqx-data:/opt/emqx/data
+      - emqx-log:/opt/emqx/log
+    networks:
+      - deltalist
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mqtt-backend:
+    build:
+      context: .
+      dockerfile: src/MqttBackend/Dockerfile
+    container_name: deltalist-mqtt-backend
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9090:9090"  # Metrics
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - Backend__Mqtt__BrokerHost=emqx
+      - Backend__Mqtt__BrokerPort=1883
+      - Backend__Redis__ConnectionString=redis:6379
+      - Backend__Security__SecretKey=local_dev_secret_key_change_me
+      - Backend__Security__Salt=local_dev_salt_change_me
+    depends_on:
+      - redis
+      - emqx
+    networks:
+      - deltalist
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: deltalist-prometheus-mqtt
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./deployment/kubernetes/monitoring/prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - deltalist
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: deltalist-grafana-mqtt
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - deltalist
+
+volumes:
+  redis-data:
+  emqx-data:
+  emqx-log:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  deltalist:
+    driver: bridge
