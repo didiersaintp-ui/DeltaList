@@ -29,6 +29,7 @@ public class SecuritySettings
     public string Salt { get; set; } = string.Empty;
     public string JwtIssuer { get; set; } = "DeltaList";
     public string JwtAudience { get; set; } = "DeltaListDevices";
+    public string? JwtSecretKey { get; set; } = null; // If null, will use SecretKey
     public int JwtExpirationMinutes { get; set; } = 60;
 }
 
