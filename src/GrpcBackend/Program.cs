@@ -83,13 +83,8 @@ builder.Services.AddSingleton<IRateLimiter>(sp =>
 // Metrics
 builder.Services.AddSingleton(new MetricsCollector("GrpcBackend"));
 
-// Storage - Event Store (with Azure fallback)
-builder.Services.AddSingleton<IEventStore>(sp =>
-{
-    var logger = sp.GetRequiredService<ILogger<AzureBlobEventStore>>();
-    var fallbackLogger = sp.GetRequiredService<ILogger<InMemoryEventStore>>();
-    return new AzureBlobEventStore(logger, backendSettings, fallbackLogger);
-});
+// Storage - Event Store (InMemory for PoC)
+builder.Services.AddSingleton<IEventStore, InMemoryEventStore>();
 
 // Blacklist Manager (with Azure persistence)
 builder.Services.AddSingleton<IBlacklistManager, BlacklistManager>();
