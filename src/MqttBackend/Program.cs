@@ -4,6 +4,7 @@ using DeltaList.Shared.Security;
 using DeltaList.Shared.Metrics;
 using DeltaList.Shared.Interfaces;
 using DeltaList.Shared.Services;
+using DeltaList.Shared.Messages;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using Serilog;
@@ -332,7 +333,7 @@ app.MapPost("/api/blacklist/sync", async (
         var state = await blacklistManager.GetBlacklistStateAsync(shardId);
 
         // Create a full sync delta (added only, no removed)
-        var syncDelta = new DeltaList.Shared.Interfaces.BlacklistDelta
+        var syncDelta = new BlacklistDelta
         {
             DeltaId = Guid.NewGuid().ToString(),
             SeqNo = state.CurrentSeqNo,

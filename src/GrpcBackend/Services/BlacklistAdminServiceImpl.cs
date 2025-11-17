@@ -1,4 +1,6 @@
 using DeltaList.Shared.Services;
+using DeltaList.Shared.Messages;
+using DeltaList.Shared.Interfaces;
 using DeltaList.Shared.Metrics;
 using Grpc.Core;
 
@@ -30,24 +32,37 @@ public class BlacklistAdminServiceImpl : BlacklistAdminService.BlacklistAdminSer
                 "Adding {Count} tokens to blacklist. Reason: {Reason}, By: {UpdatedBy}",
                 request.PanTokens.Count, request.Reason, request.UpdatedBy);
 
-            var delta = await _blacklistManager.AddToBlacklistAsync(
+            // Add to blacklist and get sequence number
+            var (seqNo, _) = await _blacklistManager.AddToBlacklistAsync(
                 request.PanTokens,
+                request.ShardId,
                 request.Reason,
-                request.UpdatedBy);
+                request.UpdatedBy,
+                context.CancellationToken);
+
+            // Get the delta that was created
+            var deltas = await _blacklistManager.GetDeltasSinceAsync(
+                seqNo - 1,
+                request.ShardId,
+                context.CancellationToken);
+            var delta = deltas.FirstOrDefault();
 
             // Broadcast delta to all connected devices
             var deviceCount = DeviceStreamServiceImpl.GetActiveConnectionCount();
-            await DeviceStreamServiceImpl.BroadcastBlacklistDeltaAsync(
-                delta,
-                _logger,
-                _metrics,
-                context.CancellationToken);
+            if (delta != null)
+            {
+                await DeviceStreamServiceImpl.BroadcastBlacklistDeltaAsync(
+                    delta,
+                    _logger,
+                    _metrics,
+                    context.CancellationToken);
+            }
 
             return new BlacklistUpdateResponse
             {
                 Success = true,
-                Message = $"Added {delta.Added.Count} tokens to blacklist",
-                DeltaSeqNo = delta.SeqNo,
+                Message = $"Added {request.PanTokens.Count} tokens to blacklist",
+                DeltaSeqNo = seqNo,
                 DevicesNotified = deviceCount
             };
         }
@@ -76,24 +91,37 @@ public class BlacklistAdminServiceImpl : BlacklistAdminService.BlacklistAdminSer
                 "Removing {Count} tokens from blacklist. Reason: {Reason}, By: {UpdatedBy}",
                 request.PanTokens.Count, request.Reason, request.UpdatedBy);
 
-            var delta = await _blacklistManager.RemoveFromBlacklistAsync(
+            // Remove from blacklist and get sequence number
+            var (seqNo, _) = await _blacklistManager.RemoveFromBlacklistAsync(
                 request.PanTokens,
+                request.ShardId,
                 request.Reason,
-                request.UpdatedBy);
+                request.UpdatedBy,
+                context.CancellationToken);
+
+            // Get the delta that was created
+            var deltas = await _blacklistManager.GetDeltasSinceAsync(
+                seqNo - 1,
+                request.ShardId,
+                context.CancellationToken);
+            var delta = deltas.FirstOrDefault();
 
             // Broadcast delta to all connected devices
             var deviceCount = DeviceStreamServiceImpl.GetActiveConnectionCount();
-            await DeviceStreamServiceImpl.BroadcastBlacklistDeltaAsync(
-                delta,
-                _logger,
-                _metrics,
-                context.CancellationToken);
+            if (delta != null)
+            {
+                await DeviceStreamServiceImpl.BroadcastBlacklistDeltaAsync(
+                    delta,
+                    _logger,
+                    _metrics,
+                    context.CancellationToken);
+            }
 
             return new BlacklistUpdateResponse
             {
                 Success = true,
-                Message = $"Removed {delta.Removed.Count} tokens from blacklist",
-                DeltaSeqNo = delta.SeqNo,
+                Message = $"Removed {request.PanTokens.Count} tokens from blacklist",
+                DeltaSeqNo = seqNo,
                 DevicesNotified = deviceCount
             };
         }
@@ -118,17 +146,10 @@ public class BlacklistAdminServiceImpl : BlacklistAdminService.BlacklistAdminSer
     {
         try
         {
-            // For PoC, we use deviceId = "global" to get full blacklist
-            var state = await _blacklistManager.GetCurrentBlacklistAsync("global");
-
-            if (state == null)
-            {
-                return new BlacklistSnapshot
-                {
-                    CurrentSeqNo = 0,
-                    TimestampUtc = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-            }
+            // Get blacklist state for the requested shard
+            var state = await _blacklistManager.GetBlacklistStateAsync(
+                request.ShardId,
+                context.CancellationToken);
 
             var snapshot = new BlacklistSnapshot
             {

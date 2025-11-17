@@ -196,7 +196,7 @@ public class MqttBrokerClient : IHostedService
         }
     }
 
-    public async Task PublishBlacklistDeltaAsync(DeltaList.Shared.Interfaces.BlacklistDelta delta)
+    public async Task PublishBlacklistDeltaAsync(DeltaList.Shared.Messages.BlacklistDelta delta)
     {
         if (_mqttClient == null || !_mqttClient.IsConnected)
         {
@@ -206,20 +206,8 @@ public class MqttBrokerClient : IHostedService
 
         try
         {
-            // Convert to Protobuf message
-            var protoDelta = new DeltaList.Shared.Messages.BlacklistDelta
-            {
-                DeltaId = delta.DeltaId,
-                SeqNo = delta.SeqNo,
-                TimestampUtc = delta.TimestampUtc,
-                Signature = delta.Signature,
-                ShardId = delta.ShardId
-            };
-            protoDelta.Added.AddRange(delta.Added);
-            protoDelta.Removed.AddRange(delta.Removed);
-
-            // Serialize delta to Protobuf
-            var payload = protoDelta.ToByteArray();
+            // Serialize delta to Protobuf (already a Protobuf message)
+            var payload = delta.ToByteArray();
 
             // Publish to broadcast topic (all devices subscribe to this)
             var topic = "blacklist/delta";
