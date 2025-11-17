@@ -2,6 +2,8 @@ using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using DeltaList.Shared.Messages;
 using DeltaList.Shared.Models;
+using DeltaList.Shared.Interfaces;
+using DeltaList.Shared.Services;
 using DeltaList.Shared.Configuration;
 using System.Text;
 using System.Text.Json;
