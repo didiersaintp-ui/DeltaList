@@ -1,5 +1,6 @@
 using DeltaList.Shared.Models;
 using DeltaList.Shared.Interfaces;
+using DeltaList.Shared.Messages;
 using DeltaList.Shared.Security;
 using DeltaList.Shared.Metrics;
 using Microsoft.Extensions.Logging;
@@ -40,7 +41,7 @@ public class BlacklistManager : IBlacklistManager
         _tokenizer = tokenizer;
     }
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Initializing BlacklistManager");
 
