@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grpc-backend-config
+  namespace: deltalist
+  labels:
+    app: grpc-backend
+    poc: poc-a
+data:
+  appsettings.Production.json: |
+    {
+      "Backend": {
+        "Environment": "Production",
+        "ServerPort": 5001,
+        "ServerHost": "0.0.0.0",
+        "MetricsPort": 9090,
+        "HealthCheckInterval": 30,
+        "GracefulShutdownTimeout": 30,
+        "MaxConcurrentStreams": 1000,
+        "KeepAliveTime": 120,
+        "KeepAliveTimeout": 20,
+        "MaxConnectionIdle": 300,
+        "MaxConnectionAge": 3600,
+        "Security": {
+          "EnableAuthentication": true,
+          "EnableAuthorization": true,
+          "TokenExpirationMinutes": 60,
+          "RefreshTokenExpirationDays": 30
+        },
+        "Redis": {
+          "MaxRetries": 3,
+          "RetryDelayMilliseconds": 100,
+          "ConnectTimeout": 5000,
+          "SyncTimeout": 5000,
+          "AbortOnConnectFail": false,
+          "KeepAlive": 60,
+          "AllowAdmin": false,
+          "Ssl": false,
+          "ConnectRetry": 3
+        },
+        "Performance": {
+          "MaxDegreeOfParallelism": 0,
+          "EnableResponseCompression": true,
+          "CompressionLevel": "Fastest"
+        },
+        "Logging": {
+          "LogLevel": {
+            "Default": "Information",
+            "Microsoft": "Warning",
+            "Microsoft.Hosting.Lifetime": "Information",
+            "Grpc": "Information"
+          },
+          "Console": {
+            "FormatterName": "json"
+          }
+        }
+      },
+      "AllowedHosts": "*"
+    }
+
+  logging.json: |
+    {
+      "Serilog": {
+        "Using": ["Serilog.Sinks.Console"],
+        "MinimumLevel": {
+          "Default": "Information",
+          "Override": {
+            "Microsoft": "Warning",
+            "System": "Warning"
+          }
+        },
+        "WriteTo": [
+          {
+            "Name": "Console",
+            "Args": {
+              "formatter": "Serilog.Formatting.Compact.CompactJsonFormatter, Serilog.Formatting.Compact"
+            }
+          }
+        ],
+        "Enrich": ["FromLogContext", "WithMachineName", "WithThreadId"],
+        "Properties": {
+          "Application": "DeltaList-gRPC-Backend",
+          "Environment": "Production"
+        }
+      }
+    }

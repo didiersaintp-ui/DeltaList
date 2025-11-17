@@ -1,0 +1,257 @@
+# Network Policies for DeltaList - Production Security
+# These policies implement zero-trust networking within the cluster
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grpc-backend-netpol
+  namespace: deltalist
+spec:
+  podSelector:
+    matchLabels:
+      app: grpc-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow external traffic on gRPC port (from LoadBalancer)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 5001
+  # Allow Prometheus scraping on metrics port
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow Redis access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow HTTPS for external APIs (if needed)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mqtt-backend-netpol
+  namespace: deltalist
+spec:
+  podSelector:
+    matchLabels:
+      app: mqtt-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow external HTTP traffic (from LoadBalancer)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow Prometheus scraping on metrics port
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow Redis access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow EMQX MQTT broker access
+  - to:
+    - podSelector:
+        matchLabels:
+          app: emqx
+    ports:
+    - protocol: TCP
+      port: 1883
+    - protocol: TCP
+      port: 8883
+  # Allow HTTPS for external APIs (if needed)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-netpol
+  namespace: deltalist
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Only allow access from gRPC and MQTT backends
+  - from:
+    - podSelector:
+        matchLabels:
+          app: grpc-backend
+    - podSelector:
+        matchLabels:
+          app: mqtt-backend
+    ports:
+    - protocol: TCP
+      port: 6379
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow Azure Storage for persistence (if using Azure Files/Disks)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: emqx-netpol
+  namespace: deltalist
+spec:
+  podSelector:
+    matchLabels:
+      app: emqx
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow MQTT from external devices (IoT)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 1883  # MQTT
+    - protocol: TCP
+      port: 8883  # MQTTS
+    - protocol: TCP
+      port: 8083  # WebSocket
+    - protocol: TCP
+      port: 8084  # WebSocket Secure
+  # Allow MQTT backend access
+  - from:
+    - podSelector:
+        matchLabels:
+          app: mqtt-backend
+    ports:
+    - protocol: TCP
+      port: 1883
+    - protocol: TCP
+      port: 8883
+  # Allow dashboard access (restrict in production)
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 18083
+  # Allow cluster communication between EMQX nodes
+  - from:
+    - podSelector:
+        matchLabels:
+          app: emqx
+    ports:
+    - protocol: TCP
+      port: 4370
+  # Allow Prometheus scraping (EMQX metrics)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 18083
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow cluster communication
+  - to:
+    - podSelector:
+        matchLabels:
+          app: emqx
+    ports:
+    - protocol: TCP
+      port: 4370
+  # Allow Azure Storage for persistence
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# Default deny all ingress and egress for namespace (optional, comment if too restrictive)
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: default-deny-all
+#   namespace: deltalist
+# spec:
+#   podSelector: {}
+#   policyTypes:
+#   - Ingress
+#   - Egress

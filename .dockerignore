@@ -1,0 +1,87 @@
+# Directories
+**/bin/
+**/obj/
+**/out/
+**/TestResults/
+**/packages/
+
+# IDE and Editor files
+**/.vs/
+**/.vscode/
+**/.idea/
+**/*.suo
+**/*.user
+**/*.userosscache
+**/*.sln.docstates
+**/.DS_Store
+
+# Build results
+**/[Dd]ebug/
+**/[Dd]ebugPublic/
+**/[Rr]elease/
+**/[Rr]eleases/
+**/x64/
+**/x86/
+**/[Ww][Ii][Nn]32/
+**/[Aa][Rr][Mm]/
+**/[Aa][Rr][Mm]64/
+**/bld/
+**/[Bb]in/
+**/[Oo]bj/
+**/[Ll]og/
+**/[Ll]ogs/
+
+# NuGet Packages
+**/*.nupkg
+**/*.snupkg
+**/packages/*
+**/.nuget/
+
+# Test Coverage
+**/coverage/
+**/*.coverage
+**/*.coveragexml
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Docker
+**/.dockerignore
+**/docker-compose*.yml
+**/Dockerfile*
+**/*.md
+README.md
+LICENSE
+
+# Documentation
+**/docs/
+**/Documentation/
+
+# Deployment
+**/deployment/
+**/k8s/
+**/kubernetes/
+
+# CI/CD
+**/.gitlab-ci.yml
+**/.travis.yml
+**/azure-pipelines.yml
+**/.circleci/
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Logs
+**/*.log
+**/*.log.*
+
+# Temporary files
+**/*.tmp
+**/*.temp
+**/*.swp
+**/*.swo
+**/~*

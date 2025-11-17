@@ -1,0 +1,64 @@
+# Pod Disruption Budgets for DeltaList - High Availability
+# These PDBs ensure minimum availability during voluntary disruptions
+# (node drains, cluster upgrades, etc.)
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: grpc-backend-pdb
+  namespace: deltalist
+  labels:
+    app: grpc-backend
+    poc: poc-a
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: grpc-backend
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mqtt-backend-pdb
+  namespace: deltalist
+  labels:
+    app: mqtt-backend
+    poc: poc-b
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mqtt-backend
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: emqx-pdb
+  namespace: deltalist
+  labels:
+    app: emqx
+    poc: poc-b
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: emqx
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+---
+# Redis PDB - Critical for both PoCs
+# For production, consider Redis Cluster/Sentinel for true HA
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: deltalist
+  labels:
+    app: redis
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
+  unhealthyPodEvictionPolicy: IfHealthyBudget

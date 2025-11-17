@@ -1,0 +1,147 @@
+version: '3.8'
+
+# ============================================
+# Docker Compose for Integration Testing
+# ============================================
+
+services:
+  # ============================================
+  # Redis Cache (Test)
+  # ============================================
+  redis-test:
+    image: redis:7-alpine
+    container_name: deltalist-redis-test
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 3s
+
+  # ============================================
+  # EMQX MQTT Broker (Test)
+  # ============================================
+  emqx-test:
+    image: emqx/emqx:5.3.2
+    container_name: deltalist-emqx-test
+    environment:
+      - EMQX_NAME=emqx-test
+      - EMQX_HOST=127.0.0.1
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=test123
+      - EMQX_LISTENERS__TCP__DEFAULT__MAX_CONNECTIONS=10000
+      - EMQX_LOG__CONSOLE_HANDLER__LEVEL=error
+      - EMQX_ALLOW_ANONYMOUS=true
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ============================================
+  # gRPC Backend (Test)
+  # ============================================
+  grpc-backend-test:
+    build:
+      context: .
+      dockerfile: src/GrpcBackend/Dockerfile
+      args:
+        BUILD_CONFIGURATION: Release
+    image: deltalist/grpc-backend:test
+    container_name: deltalist-grpc-backend-test
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ASPNETCORE_URLS=http://+:5001
+      - Backend__Redis__ConnectionString=redis-test:6379
+      - Backend__Security__SecretKey=test_secret_key_12345678901234567890123456789012
+      - Backend__Security__Salt=test_salt_12345678901234567890123456789012
+    depends_on:
+      redis-test:
+        condition: service_healthy
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # MQTT Backend (Test)
+  # ============================================
+  mqtt-backend-test:
+    build:
+      context: .
+      dockerfile: src/MqttBackend/Dockerfile
+      args:
+        BUILD_CONFIGURATION: Release
+    image: deltalist/mqtt-backend:test
+    container_name: deltalist-mqtt-backend-test
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ASPNETCORE_URLS=http://+:8080
+      - Backend__Mqtt__BrokerHost=emqx-test
+      - Backend__Mqtt__BrokerPort=1883
+      - Backend__Redis__ConnectionString=redis-test:6379
+      - Backend__Security__SecretKey=test_secret_key_12345678901234567890123456789012
+      - Backend__Security__Salt=test_salt_12345678901234567890123456789012
+    depends_on:
+      redis-test:
+        condition: service_healthy
+      emqx-test:
+        condition: service_healthy
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # Integration Test Runner
+  # ============================================
+  test-runner:
+    build:
+      context: .
+      dockerfile: tests/integration/Dockerfile
+    container_name: deltalist-test-runner
+    environment:
+      - GRPC_BACKEND_URL=http://grpc-backend-test:5001
+      - MQTT_BACKEND_URL=http://mqtt-backend-test:8080
+      - MQTT_BROKER_URL=mqtt://emqx-test:1883
+      - REDIS_URL=redis://redis-test:6379
+    depends_on:
+      grpc-backend-test:
+        condition: service_healthy
+      mqtt-backend-test:
+        condition: service_healthy
+    networks:
+      - test-net
+    command: |
+      /bin/sh -c "
+        echo 'Waiting for services to be ready...' &&
+        sleep 5 &&
+        echo 'Running integration tests...' &&
+        dotnet test --logger 'console;verbosity=detailed' --results-directory /test-results
+      "
+    profiles:
+      - test
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16

@@ -1,0 +1,246 @@
+# ServiceMonitor resources for Prometheus Operator
+# These resources configure automatic scraping of application metrics
+# Requires Prometheus Operator to be installed in the cluster
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: grpc-backend-monitor
+  namespace: deltalist
+  labels:
+    app: grpc-backend
+    poc: poc-a
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: grpc-backend
+  endpoints:
+  - port: metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_label_app]
+      targetLabel: app
+    - sourceLabels: [__meta_kubernetes_pod_label_poc]
+      targetLabel: poc
+    metricRelabelings:
+    # Drop high-cardinality metrics if needed
+    - sourceLabels: [__name__]
+      regex: 'go_memstats_.*'
+      action: drop
+  namespaceSelector:
+    matchNames:
+    - deltalist
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mqtt-backend-monitor
+  namespace: deltalist
+  labels:
+    app: mqtt-backend
+    poc: poc-b
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: mqtt-backend
+  endpoints:
+  - port: metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    path: /metrics
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_label_app]
+      targetLabel: app
+    - sourceLabels: [__meta_kubernetes_pod_label_poc]
+      targetLabel: poc
+    metricRelabelings:
+    # Drop high-cardinality metrics if needed
+    - sourceLabels: [__name__]
+      regex: 'go_memstats_.*'
+      action: drop
+  namespaceSelector:
+    matchNames:
+    - deltalist
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: emqx-monitor
+  namespace: deltalist
+  labels:
+    app: emqx
+    poc: poc-b
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: emqx
+  endpoints:
+  - port: dashboard
+    interval: 30s
+    scrapeTimeout: 15s
+    path: /api/v5/prometheus/stats
+    scheme: http
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_label_app]
+      targetLabel: app
+  namespaceSelector:
+    matchNames:
+    - deltalist
+
+---
+# PodMonitor as alternative if Services don't have metrics port
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: deltalist-backends-pod-monitor
+  namespace: deltalist
+  labels:
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - grpc-backend
+      - mqtt-backend
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_label_app]
+      targetLabel: app
+    - sourceLabels: [__meta_kubernetes_pod_label_poc]
+      targetLabel: poc
+  namespaceSelector:
+    matchNames:
+    - deltalist
+
+---
+# PrometheusRule for alerting (optional but recommended)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: deltalist-alerts
+  namespace: deltalist
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: deltalist.rules
+    interval: 30s
+    rules:
+    # High CPU usage alert
+    - alert: HighCPUUsage
+      expr: |
+        rate(container_cpu_usage_seconds_total{namespace="deltalist"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage detected"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has high CPU usage ({{ $value }})"
+
+    # High Memory usage alert
+    - alert: HighMemoryUsage
+      expr: |
+        container_memory_usage_bytes{namespace="deltalist"} / container_spec_memory_limit_bytes{namespace="deltalist"} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage detected"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has high memory usage ({{ $value }})"
+
+    # Pod restart alert
+    - alert: PodRestartingTooOften
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="deltalist"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod restarting frequently"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+
+    # gRPC backend down
+    - alert: GrpcBackendDown
+      expr: |
+        up{job="grpc-backend", namespace="deltalist"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "gRPC backend is down"
+        description: "gRPC backend {{ $labels.pod }} has been down for more than 2 minutes"
+
+    # MQTT backend down
+    - alert: MqttBackendDown
+      expr: |
+        up{job="mqtt-backend", namespace="deltalist"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "MQTT backend is down"
+        description: "MQTT backend {{ $labels.pod }} has been down for more than 2 minutes"
+
+    # EMQX cluster node down
+    - alert: EmqxNodeDown
+      expr: |
+        up{job="emqx", namespace="deltalist"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "EMQX node is down"
+        description: "EMQX node {{ $labels.pod }} has been down for more than 2 minutes"
+
+    # Redis down
+    - alert: RedisDown
+      expr: |
+        up{job="redis", namespace="deltalist"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Redis is down"
+        description: "Redis instance has been down for more than 2 minutes"
+
+    # HPA at max capacity
+    - alert: HPAMaxedOut
+      expr: |
+        kube_horizontalpodautoscaler_status_current_replicas{namespace="deltalist"}
+        == kube_horizontalpodautoscaler_spec_max_replicas{namespace="deltalist"}
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "HPA at maximum capacity"
+        description: "HPA {{ $labels.horizontalpodautoscaler }} has been at max replicas for 15 minutes"

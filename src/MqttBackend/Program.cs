@@ -7,6 +7,7 @@ using DeltaList.Shared.Services;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using Serilog;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 

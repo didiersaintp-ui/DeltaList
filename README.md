@@ -1,6 +1,42 @@
 # DeltaList - PoC Comparison: gRPC vs MQTT
 
-🚀 **Proof of Concept pour comparer gRPC bidirectionnel streaming et MQTT (EMQX) pour 30k devices 4G**
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![.NET Version](https://img.shields.io/badge/.NET-8.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Azure%20AKS-0078D4)
+![Status](https://img.shields.io/badge/status-production%20ready-success)
+
+**Proof of Concept pour comparer gRPC bidirectionnel streaming et MQTT (EMQX) pour 30k devices 4G**
+
+---
+
+## ⚡ Quick Start (3 minutes)
+
+```bash
+# Cloner le repository
+git clone https://github.com/your-org/DeltaList.git
+cd DeltaList
+
+# Test PoC A (gRPC)
+docker-compose -f docker-compose.grpc.yml up -d
+./scripts/validate-deployment.sh grpc
+# Ouvrir http://localhost:9090/metrics
+
+# Ou Test PoC B (MQTT)
+docker-compose -f docker-compose.mqtt.yml up -d
+./scripts/validate-deployment.sh mqtt
+# Ouvrir http://localhost:18083 (EMQX Dashboard)
+```
+
+**Premiers tests** :
+```bash
+# Simuler 10 devices pendant 60 secondes
+dotnet run --project src/GrpcDeviceSimulator -- --server localhost:5001 --devices 10 --duration 60
+# OU
+dotnet run --project src/MqttDeviceSimulator -- --server localhost --devices 10 --duration 60
+```
+
+---
 
 ## 📋 Sommaire
 
@@ -435,18 +471,36 @@ DeltaList/
 
 ---
 
+## 📚 Documentation Détaillée
+
+Pour aller plus loin, consultez la documentation complète :
+
+- **[Architecture détaillée](docs/ARCHITECTURE.md)** - Design système, patterns, décisions architecturales
+- **[Sécurité et conformité](docs/SECURITY.md)** - PCI-DSS, tokenization, authentification
+- **[Performance et benchmarks](docs/PERFORMANCE.md)** - Métriques, latence, throughput, optimisations
+- **[Guide de tests](tests/TESTING_GUIDE.md)** - Tests d'intégration et de charge
+- **[FAQ](docs/FAQ.md)** - Questions fréquentes et troubleshooting
+- **[Comparaison PoC](docs/POC_COMPARISON.md)** - Analyse détaillée gRPC vs MQTT
+- **[Roadmap](ROADMAP.md)** - Évolutions futures du projet
+
+---
+
 ## 🤝 Contributing
 
-1. Créer une branche feature : `git checkout -b feature/ma-feature`
-2. Commit : `git commit -m "Description"`
-3. Push : `git push origin feature/ma-feature`
-4. Ouvrir une Pull Request
+Nous accueillons les contributions ! Consultez notre [guide de contribution](CONTRIBUTING.md) pour plus de détails.
+
+**Quick contribution** :
+1. Fork le projet
+2. Créer une branche feature : `git checkout -b feature/ma-feature`
+3. Commit : `git commit -m "feat: description"`
+4. Push : `git push origin feature/ma-feature`
+5. Ouvrir une Pull Request
 
 ---
 
 ## 📄 License
 
-[À définir]
+Ce projet est sous licence MIT - voir le fichier [LICENSE](LICENSE) pour plus de détails.
 
 ---
 
