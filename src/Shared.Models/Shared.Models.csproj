@@ -23,7 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\*.proto" GrpcServices="Both" />
+    <!-- Protobuf files - messages.proto first (no dependencies) -->
+    <Protobuf Include="Protos\messages.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <!-- device_stream.proto imports messages.proto -->
+    <Protobuf Include="Protos\device_stream.proto" GrpcServices="Both" ProtoRoot="Protos" />
   </ItemGroup>
 
 </Project>
