@@ -13,6 +13,9 @@ WORKDIR /app
 EXPOSE 5001
 EXPOSE 9090
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Create non-root user
 RUN addgroup -g 1000 appgroup && \
     adduser -u 1000 -G appgroup -s /bin/sh -D appuser && \

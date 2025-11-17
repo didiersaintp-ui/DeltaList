@@ -1,4 +1,5 @@
 using DeltaList.Shared.Models;
+using DeltaList.Shared.Messages;
 
 namespace DeltaList.Shared.Interfaces;
 
@@ -77,18 +78,9 @@ public interface IBlacklistManager
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Count of blacklisted tokens</returns>
     Task<int> GetBlacklistCountAsync(int shardId, CancellationToken cancellationToken = default);
-}
 
-/// <summary>
-/// Represents a blacklist delta for distribution to devices
-/// </summary>
-public class BlacklistDelta
-{
-    public string DeltaId { get; set; } = Guid.NewGuid().ToString();
-    public ulong SeqNo { get; set; }
-    public long TimestampUtc { get; set; }
-    public List<string> Added { get; set; } = new();
-    public List<string> Removed { get; set; } = new();
-    public string Signature { get; set; } = string.Empty;
-    public int ShardId { get; set; }
+    /// <summary>
+    /// Initialize the blacklist manager (load persisted state, etc.)
+    /// </summary>
+    Task InitializeAsync(CancellationToken cancellationToken = default);
 }

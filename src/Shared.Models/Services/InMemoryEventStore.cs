@@ -1,5 +1,6 @@
 using DeltaList.Shared.Models;
 using DeltaList.Shared.Interfaces;
+using DeltaList.Shared.Messages;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
