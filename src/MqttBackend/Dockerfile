@@ -22,9 +22,9 @@ RUN addgroup -g 1000 appgroup && \
     chown -R appuser:appgroup /app
 
 # ============================================
-# Stage 2: Build
+# Stage 2: Build (using Debian for Grpc.Tools/protoc compatibility)
 # ============================================
-FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
