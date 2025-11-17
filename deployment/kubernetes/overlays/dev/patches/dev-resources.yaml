@@ -1,0 +1,51 @@
+# Development resource patches - lower limits for cost optimization
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grpc-backend
+spec:
+  template:
+    spec:
+      containers:
+      - name: grpc-backend
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-backend
+spec:
+  template:
+    spec:
+      containers:
+      - name: mqtt-backend
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  template:
+    spec:
+      containers:
+      - name: redis
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi

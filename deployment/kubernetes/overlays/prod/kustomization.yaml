@@ -1,0 +1,96 @@
+# Kustomize overlay for PRODUCTION environment
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base configuration
+bases:
+  - ../../base
+
+# No namespace suffix for production (uses base namespace 'deltalist')
+
+# Production labels
+commonLabels:
+  environment: production
+  tier: prod
+
+# Production annotations
+commonAnnotations:
+  environment: production
+  criticality: high
+
+# Replicas for production (high availability)
+replicas:
+  - name: grpc-backend
+    count: 3
+  - name: mqtt-backend
+    count: 3
+  - name: emqx
+    count: 3
+  - name: redis
+    count: 1  # Consider Redis Cluster for true HA
+
+# Images for production
+images:
+  - name: grpc-backend
+    newTag: v1.0.0  # Use specific version tags in production
+  - name: mqtt-backend
+    newTag: v1.0.0
+
+# ConfigMap generator for prod-specific config
+configMapGenerator:
+  - name: env-config
+    behavior: create
+    literals:
+      - ENVIRONMENT=Production
+      - LOG_LEVEL=Information
+      - ENABLE_DETAILED_ERRORS=false
+
+# Patches specific to production
+patchesStrategicMerge:
+  - patches/prod-resources.yaml
+  - patches/prod-hpa.yaml
+  - patches/prod-security.yaml
+
+# JSON patches for production optimizations
+patchesJson6902:
+  # Set imagePullPolicy to IfNotPresent for production
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: grpc-backend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: mqtt-backend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+
+  # Add production-specific annotations
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: grpc-backend
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/cluster-autoscaler.kubernetes.io~1safe-to-evict
+        value: "false"
+
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: mqtt-backend
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/cluster-autoscaler.kubernetes.io~1safe-to-evict
+        value: "false"

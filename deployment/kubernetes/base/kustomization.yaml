@@ -1,0 +1,64 @@
+# Kustomize base configuration for DeltaList
+# This contains all common resources shared across environments
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Common namespace
+namespace: deltalist
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: deltalist
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  contact: devops@deltalist.com
+  documentation: https://github.com/deltalist/docs
+
+# Resources to include
+resources:
+  # Namespace and base secrets
+  - ../grpc/namespace.yaml
+
+  # gRPC Backend (PoC A)
+  - ../grpc/configmap.yaml
+  - ../grpc/deployment.yaml
+  - ../grpc/redis.yaml
+
+  # MQTT Backend (PoC B)
+  - ../mqtt/configmap.yaml
+  - ../mqtt/mqtt-backend-deployment.yaml
+  - ../mqtt/emqx-deployment.yaml
+
+  # Security and HA
+  - ../network-policy.yaml
+  - ../pod-disruption-budget.yaml
+
+  # Monitoring (optional, comment if Prometheus Operator not installed)
+  # - ../monitoring/servicemonitor.yaml
+
+# ConfigMap generator for environment-specific config
+# configMapGenerator:
+#   - name: app-config
+#     literals:
+#       - ENVIRONMENT=base
+
+# Secret generator (use with caution, prefer external secret management)
+# secretGenerator:
+#   - name: app-secrets
+#     literals:
+#       - placeholder=change-me
+
+# Images to use (will be overridden in overlays)
+images:
+  - name: grpc-backend
+    newName: ${ACR_NAME}.azurecr.io/grpc-backend
+    newTag: latest
+  - name: mqtt-backend
+    newName: ${ACR_NAME}.azurecr.io/mqtt-backend
+    newTag: latest
+
+# Patches to apply to all resources
+# patchesStrategicMerge:
+#   - patches/common-patches.yaml

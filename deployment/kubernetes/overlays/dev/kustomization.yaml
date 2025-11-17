@@ -1,0 +1,80 @@
+# Kustomize overlay for DEVELOPMENT environment
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base configuration
+bases:
+  - ../../base
+
+# Namespace suffix for dev
+nameSuffix: -dev
+
+# Environment-specific labels
+commonLabels:
+  environment: development
+  tier: dev
+
+# Environment-specific annotations
+commonAnnotations:
+  environment: development
+
+# Replicas for dev (lower than production)
+replicas:
+  - name: grpc-backend
+    count: 2
+  - name: mqtt-backend
+    count: 2
+  - name: emqx
+    count: 1
+  - name: redis
+    count: 1
+
+# Images for dev environment
+images:
+  - name: grpc-backend
+    newTag: dev-latest
+  - name: mqtt-backend
+    newTag: dev-latest
+
+# ConfigMap generator for dev-specific config
+configMapGenerator:
+  - name: env-config
+    behavior: create
+    literals:
+      - ENVIRONMENT=Development
+      - LOG_LEVEL=Debug
+      - ENABLE_DETAILED_ERRORS=true
+
+# Patches specific to dev environment
+patchesStrategicMerge:
+  - patches/dev-resources.yaml
+  - patches/dev-hpa.yaml
+
+# JSON patches for fine-grained changes
+patchesJson6902:
+  # Reduce resource requests for dev
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: grpc-backend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "250m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "256Mi"
+
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: mqtt-backend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "250m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "256Mi"
