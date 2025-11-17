@@ -3,6 +3,7 @@ using DeltaList.Shared.Services;
 using DeltaList.Shared.Metrics;
 using DeltaList.Shared.Security;
 using DeltaList.Shared.Interfaces;
+using DeltaList.Shared.Models;
 using Grpc.Core;
 using Microsoft.Extensions.Caching.Distributed;
 using System.Collections.Concurrent;
@@ -215,8 +216,19 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
 
         try
         {
-            // Store events
-            await _eventStore.StoreBatchAsync(batch, receiveTime);
+            // Store events - convert protobuf events to EventRecord objects
+            var eventRecords = batch.Events.Select(e => new EventRecord
+            {
+                DeviceId = deviceId,
+                DeviceTimestampUtc = e.DeviceTimestampUtc,
+                ReceivedTimestampUtc = ((DateTimeOffset)receiveTime).ToUnixTimeMilliseconds(),
+                BatchSeq = batch.BatchSeq,
+                EventType = e.EventType,
+                Attributes = e.Attributes.ToDictionary(kv => kv.Key, kv => kv.Value),
+                TransactionId = e.TransactionId
+            });
+
+            await _eventStore.StoreEventsAsync(deviceId, eventRecords, cancellationToken);
 
             // Send acknowledgment
             var ack = new ServerMessage
@@ -302,7 +314,8 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
     {
         try
         {
-            var blacklist = await _blacklistManager.GetCurrentBlacklistAsync(deviceId);
+            // Get blacklist state for shard 0 (simplified for PoC)
+            var blacklist = await _blacklistManager.GetBlacklistStateAsync(0, cancellationToken);
 
             if (blacklist != null && blacklist.PanTokens.Any())
             {

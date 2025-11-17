@@ -2,6 +2,8 @@ using GrpcBackend.Services;
 using DeltaList.Shared.Configuration;
 using DeltaList.Shared.Security;
 using DeltaList.Shared.Metrics;
+using DeltaList.Shared.Interfaces;
+using DeltaList.Shared.Services;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -97,7 +99,7 @@ builder.Services.AddOpenTelemetry()
             .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("GrpcBackend"))
             .AddMeter("GrpcBackend")
             .AddAspNetCoreInstrumentation()
-            .AddRuntimeInstrumentation()
+            // .AddRuntimeInstrumentation() // Requires OpenTelemetry.Instrumentation.Runtime package
             .AddPrometheusExporter();
     });
 
