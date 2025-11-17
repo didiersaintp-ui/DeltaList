@@ -4,6 +4,8 @@ using MQTTnet.Client;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using MqttDeviceSimulator.Authentication;
+using MqttDeviceSimulator.Metrics;
 
 namespace MqttDeviceSimulator;
 
@@ -13,6 +15,8 @@ public class DeviceSimulator
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, MqttDeviceClient> _devices = new();
     private readonly Random _random = new();
+    private readonly AdvancedMetricsCollector _metricsCollector;
+    private readonly MqttAuthClient? _authClient;
 
     // Metrics
     private long _totalBatchesSent = 0;
@@ -20,11 +24,22 @@ public class DeviceSimulator
     private long _totalBlacklistDeltasReceived = 0;
     private long _totalReconnects = 0;
     private long _totalErrors = 0;
+    private long _totalMessagesLost = 0;
 
     public DeviceSimulator(SimulatorOptions options)
     {
         _options = options;
+        _metricsCollector = new AdvancedMetricsCollector(_options.MetricsDirectory);
+
+        if (_options.UseAuthentication && !string.IsNullOrEmpty(_options.AuthServerUrl))
+        {
+            _authClient = new MqttAuthClient(_options.AuthServerUrl, _options.UseAuthentication);
+            Log.Information("Authentication enabled with server: {AuthServer}", _options.AuthServerUrl);
+        }
     }
+
+    public MqttAuthClient? AuthClient => _authClient;
+    public AdvancedMetricsCollector MetricsCollector => _metricsCollector;
 
     public async Task RunAsync()
     {
@@ -34,21 +49,29 @@ public class DeviceSimulator
         Log.Information("Duration: {Duration}s", _options.DurationSeconds);
         Log.Information("Batch interval: {Interval}s", _options.BatchIntervalSeconds);
         Log.Information("Events per batch: {Count}", _options.EventsPerBatch);
+        Log.Information("QoS Level: {QoS}", _options.QosLevel);
+        Log.Information("Test mode: {TestMode}", _options.TestMode);
+        Log.Information("Authentication: {Auth}", _options.UseAuthentication ? "Enabled" : "Disabled");
 
         var stopwatch = Stopwatch.StartNew();
 
-        // Start all device clients
+        // Start all device clients based on test mode
         var deviceTasks = new List<Task>();
-        for (int i = 0; i < _options.DeviceCount; i++)
+
+        switch (_options.TestMode.ToLower())
         {
-            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
-            var client = new MqttDeviceClient(deviceId, _options, this);
-            _devices[deviceId] = client;
-
-            // Stagger device starts to avoid thundering herd
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
-
-            deviceTasks.Add(client.RunAsync(_cts.Token));
+            case "burst":
+                deviceTasks = await StartDevicesInBurstMode();
+                break;
+            case "staggered":
+                deviceTasks = await StartDevicesInStaggeredMode();
+                break;
+            case "stress":
+                deviceTasks = await StartDevicesInStressMode();
+                break;
+            default: // normal
+                deviceTasks = await StartDevicesNormalMode();
+                break;
         }
 
         // Start metrics reporter
@@ -86,7 +109,112 @@ public class DeviceSimulator
         Log.Information("Total blacklist deltas received: {Count}", _totalBlacklistDeltasReceived);
         Log.Information("Total reconnects: {Count}", _totalReconnects);
         Log.Information("Total errors: {Count}", _totalErrors);
+        Log.Information("Total messages lost (QoS 0): {Count}", _totalMessagesLost);
         Log.Information("Avg throughput: {Rate:F2} events/sec", _totalEventsSent / stopwatch.Elapsed.TotalSeconds);
+
+        // Export advanced metrics
+        if (_options.ExportMetrics)
+        {
+            _metricsCollector.IncrementCounter("batches_sent", _totalBatchesSent);
+            _metricsCollector.IncrementCounter("events_sent", _totalEventsSent);
+            _metricsCollector.IncrementCounter("blacklist_deltas_received", _totalBlacklistDeltasReceived);
+            _metricsCollector.IncrementCounter("reconnects", _totalReconnects);
+            _metricsCollector.IncrementCounter("requests_failed", _totalErrors);
+            _metricsCollector.IncrementCounter("requests_total", _totalBatchesSent + _totalErrors);
+            _metricsCollector.IncrementCounter("messages_lost", _totalMessagesLost);
+
+            _metricsCollector.PrintSummary();
+
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            await _metricsCollector.ExportToCsvAsync($"mqtt_metrics_{timestamp}.csv");
+            await _metricsCollector.ExportRawLatenciesAsync($"mqtt_latencies_{timestamp}.csv");
+        }
+    }
+
+    private async Task<List<Task>> StartDevicesNormalMode()
+    {
+        Log.Information("Starting devices in NORMAL mode");
+        var deviceTasks = new List<Task>();
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new MqttDeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(_options.StaggerDelayMs));
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+        }
+
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInBurstMode()
+    {
+        Log.Information("Starting devices in BURST mode (all devices start simultaneously)");
+        var deviceTasks = new List<Task>();
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new MqttDeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+        }
+
+        foreach (var client in _devices.Values)
+        {
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+        }
+
+        await Task.Delay(100);
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInStaggeredMode()
+    {
+        Log.Information("Starting devices in STAGGERED mode (longer delays between starts)");
+        var deviceTasks = new List<Task>();
+        var delayMs = Math.Max(_options.StaggerDelayMs * 5, 500);
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new MqttDeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+            await Task.Delay(TimeSpan.FromMilliseconds(delayMs));
+
+            if (i % 10 == 0 && i > 0)
+            {
+                Log.Information("Started {Count}/{Total} devices", i, _options.DeviceCount);
+            }
+        }
+
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInStressMode()
+    {
+        Log.Information("Starting devices in STRESS mode (minimal delays, maximum load)");
+        var deviceTasks = new List<Task>();
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new MqttDeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+
+            if (i % 100 == 0)
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        await Task.Delay(100);
+        return deviceTasks;
     }
 
     private async Task ReportMetricsAsync(CancellationToken ct)
@@ -119,6 +247,7 @@ public class DeviceSimulator
     public void IncrementDeltasReceived() => Interlocked.Increment(ref _totalBlacklistDeltasReceived);
     public void IncrementReconnects() => Interlocked.Increment(ref _totalReconnects);
     public void IncrementErrors() => Interlocked.Increment(ref _totalErrors);
+    public void IncrementMessagesLost() => Interlocked.Increment(ref _totalMessagesLost);
 
     public bool ShouldSimulatePacketLoss() =>
         _options.PacketLossRate > 0 && _random.NextDouble() < _options.PacketLossRate;

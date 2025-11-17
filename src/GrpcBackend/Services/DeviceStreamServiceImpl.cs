@@ -1,6 +1,8 @@
 using DeltaList.Shared.Messages;
 using DeltaList.Shared.Services;
 using DeltaList.Shared.Metrics;
+using DeltaList.Shared.Security;
+using DeltaList.Shared.Interfaces;
 using Grpc.Core;
 using Microsoft.Extensions.Caching.Distributed;
 using System.Collections.Concurrent;
@@ -15,6 +17,9 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
     private readonly MetricsCollector _metrics;
     private readonly IEventStore _eventStore;
     private readonly IBlacklistManager _blacklistManager;
+    private readonly IJwtTokenService _jwtTokenService;
+    private readonly IDeviceRegistry _deviceRegistry;
+    private readonly IRateLimiter _rateLimiter;
 
     // Track active device streams
     private static readonly ConcurrentDictionary<string, IServerStreamWriter<ServerMessage>> _deviceStreams = new();
@@ -24,13 +29,19 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
         IDistributedCache cache,
         MetricsCollector metrics,
         IEventStore eventStore,
-        IBlacklistManager blacklistManager)
+        IBlacklistManager blacklistManager,
+        IJwtTokenService jwtTokenService,
+        IDeviceRegistry deviceRegistry,
+        IRateLimiter rateLimiter)
     {
         _logger = logger;
         _cache = cache;
         _metrics = metrics;
         _eventStore = eventStore;
         _blacklistManager = blacklistManager;
+        _jwtTokenService = jwtTokenService;
+        _deviceRegistry = deviceRegistry;
+        _rateLimiter = rateLimiter;
     }
 
     public override async Task Connect(
@@ -43,12 +54,43 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
 
         try
         {
-            // Extract device ID from metadata
-            deviceId = context.RequestHeaders.GetValue("device-id") ?? "unknown";
+            // ========== JWT AUTHENTICATION ==========
+            // Extract and validate JWT token from metadata
+            var authHeader = context.RequestHeaders.GetValue("authorization");
+            if (string.IsNullOrEmpty(authHeader))
+            {
+                _logger.LogWarning("Connection rejected: missing authorization header");
+                _metrics.RecordError("missing_auth_token");
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Missing authorization token"));
+            }
+
+            // Remove "Bearer " prefix if present
+            var token = authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? authHeader.Substring(7)
+                : authHeader;
+
+            // Validate JWT token
+            deviceId = _jwtTokenService.ValidateToken(token);
+            if (string.IsNullOrEmpty(deviceId))
+            {
+                _logger.LogWarning("Connection rejected: invalid JWT token");
+                _metrics.RecordError("invalid_auth_token");
+                throw new RpcException(new Status(StatusCode.Unauthenticated, "Invalid or expired token"));
+            }
+
+            // Verify device is registered and active
+            var isValid = await _deviceRegistry.ValidateDeviceAsync(deviceId, context.CancellationToken);
+            if (!isValid)
+            {
+                _logger.LogWarning("Connection rejected: device {DeviceId} is not active or not registered", deviceId);
+                _metrics.RecordError("device_not_active");
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "Device is not active"));
+            }
+
             var connectionId = Guid.NewGuid().ToString();
 
             _logger.LogInformation(
-                "Device {DeviceId} connected with connection {ConnectionId}",
+                "Device {DeviceId} authenticated and connected with connection {ConnectionId}",
                 deviceId, connectionId);
 
             // Track metrics
@@ -141,34 +183,80 @@ public class DeviceStreamServiceImpl : DeviceStreamService.DeviceStreamServiceBa
             "Processing batch {BatchSeq} from device {DeviceId} with {EventCount} events",
             batch.BatchSeq, deviceId, batch.Events.Count);
 
+        // ========== RATE LIMITING ==========
+        if (!_rateLimiter.AllowBatch(deviceId))
+        {
+            _logger.LogWarning(
+                "Rate limit exceeded for device {DeviceId}, batch {BatchSeq} rejected",
+                deviceId, batch.BatchSeq);
+            _metrics.RecordError("rate_limit_exceeded");
+
+            // Send negative acknowledgment
+            var nack = new ServerMessage
+            {
+                Ack = new Ack
+                {
+                    MessageId = batch.BatchSeq.ToString(),
+                    AckType = "batch",
+                    Success = false,
+                    ErrorMessage = $"Rate limit exceeded. Remaining quota: {_rateLimiter.GetRemainingQuota(deviceId)}"
+                }
+            };
+
+            await responseStream.WriteAsync(nack, cancellationToken);
+            return;
+        }
+
         _metrics.RecordMessageIn();
         _metrics.RecordBatchSize(batch.Events.Count);
 
         // TODO: Verify signature
         // if (!VerifyBatchSignature(batch)) { ... }
 
-        // Store events
-        await _eventStore.StoreBatchAsync(batch, receiveTime);
-
-        // Send acknowledgment
-        var ack = new ServerMessage
+        try
         {
-            Ack = new Ack
+            // Store events
+            await _eventStore.StoreBatchAsync(batch, receiveTime);
+
+            // Send acknowledgment
+            var ack = new ServerMessage
             {
-                MessageId = batch.BatchSeq.ToString(),
-                AckType = "batch",
-                Success = true
-            }
-        };
+                Ack = new Ack
+                {
+                    MessageId = batch.BatchSeq.ToString(),
+                    AckType = "batch",
+                    Success = true
+                }
+            };
 
-        await responseStream.WriteAsync(ack, cancellationToken);
+            await responseStream.WriteAsync(ack, cancellationToken);
 
-        var latency = (DateTime.UtcNow - processingStart).TotalMilliseconds;
-        _metrics.RecordMessageLatency(latency, "batch");
+            var latency = (DateTime.UtcNow - processingStart).TotalMilliseconds;
+            _metrics.RecordMessageLatency(latency, "batch");
 
-        _logger.LogDebug(
-            "Batch {BatchSeq} from device {DeviceId} processed in {Latency}ms",
-            batch.BatchSeq, deviceId, latency);
+            _logger.LogDebug(
+                "Batch {BatchSeq} from device {DeviceId} processed in {Latency}ms",
+                batch.BatchSeq, deviceId, latency);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error storing batch {BatchSeq} from device {DeviceId}", batch.BatchSeq, deviceId);
+            _metrics.RecordError("batch_storage_error");
+
+            // Send error acknowledgment
+            var errorAck = new ServerMessage
+            {
+                Ack = new Ack
+                {
+                    MessageId = batch.BatchSeq.ToString(),
+                    AckType = "batch",
+                    Success = false,
+                    ErrorMessage = $"Storage error: {ex.Message}"
+                }
+            };
+
+            await responseStream.WriteAsync(errorAck, cancellationToken);
+        }
     }
 
     private async Task ProcessHeartbeatAsync(

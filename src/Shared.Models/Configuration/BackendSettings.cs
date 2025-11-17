@@ -72,6 +72,8 @@ public class MqttSettings
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public bool UseTls { get; set; } = true;
+    public int QoS { get; set; } = 1; // 0 = AtMostOnce, 1 = AtLeastOnce, 2 = ExactlyOnce
+    public bool RetainBlacklistDeltas { get; set; } = true;
     public int KeepAlivePeriodSeconds { get; set; } = 60;
     public int MaxPendingMessages { get; set; } = 10000;
 }

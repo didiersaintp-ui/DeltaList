@@ -1,7 +1,7 @@
 using DeltaList.Shared.Configuration;
 using DeltaList.Shared.Messages;
 using DeltaList.Shared.Metrics;
-using GrpcBackend.Services;
+using DeltaList.Shared.Interfaces;
 using Google.Protobuf;
 using MQTTnet;
 using MQTTnet.Client;
@@ -20,6 +20,8 @@ public class MqttBrokerClient : IHostedService
 
     private IManagedMqttClient? _mqttClient;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
+    private int _reconnectAttempts = 0;
+    private const int MAX_RECONNECT_DELAY_SECONDS = 300; // 5 minutes
 
     public bool IsConnected => _mqttClient?.IsConnected ?? false;
 
@@ -58,10 +60,10 @@ public class MqttBrokerClient : IHostedService
             clientOptions.WithTls();
         }
 
-        // Create managed client options
+        // Create managed client options with exponential backoff
         var managedOptions = new ManagedMqttClientOptionsBuilder()
             .WithClientOptions(clientOptions.Build())
-            .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
+            .WithAutoReconnectDelay(CalculateReconnectDelay())
             .WithMaxPendingMessages(_settings.Mqtt.MaxPendingMessages)
             .Build();
 
@@ -77,10 +79,18 @@ public class MqttBrokerClient : IHostedService
         // Start client
         await _mqttClient.StartAsync(managedOptions);
 
-        // Subscribe to device event topics
-        await _mqttClient.SubscribeAsync("devices/+/events", MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce);
+        // Subscribe to device event topics with configurable QoS
+        var qosLevel = _settings.Mqtt.QoS switch
+        {
+            0 => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce,
+            1 => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce,
+            2 => MQTTnet.Protocol.MqttQualityOfServiceLevel.ExactlyOnce,
+            _ => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce
+        };
 
-        _logger.LogInformation("MQTT Broker Client started successfully");
+        await _mqttClient.SubscribeAsync("devices/+/events", qosLevel);
+
+        _logger.LogInformation("MQTT Broker Client started successfully (QoS: {QoS})", _settings.Mqtt.QoS);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -98,16 +108,30 @@ public class MqttBrokerClient : IHostedService
 
     private Task OnConnectedAsync(MqttClientConnectedEventArgs args)
     {
-        _logger.LogInformation("Connected to MQTT broker");
+        _reconnectAttempts = 0; // Reset on successful connection
+        _logger.LogInformation("Connected to MQTT broker successfully");
         _metrics.RecordConnection();
         return Task.CompletedTask;
     }
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs args)
     {
-        _logger.LogWarning("Disconnected from MQTT broker: {Reason}", args.Reason);
+        _reconnectAttempts++;
+        var delay = CalculateReconnectDelay();
+
+        _logger.LogWarning(
+            "Disconnected from MQTT broker: {Reason}. Reconnect attempt #{Attempt}, next retry in {Delay}s",
+            args.Reason, _reconnectAttempts, delay.TotalSeconds);
+
         _metrics.RecordError("mqtt_disconnection");
         return Task.CompletedTask;
+    }
+
+    private TimeSpan CalculateReconnectDelay()
+    {
+        // Exponential backoff: 2^attempt seconds, capped at MAX_RECONNECT_DELAY_SECONDS
+        var delaySeconds = Math.Min(Math.Pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY_SECONDS);
+        return TimeSpan.FromSeconds(delaySeconds);
     }
 
     private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs args)
@@ -172,7 +196,7 @@ public class MqttBrokerClient : IHostedService
         }
     }
 
-    public async Task PublishBlacklistDeltaAsync(BlacklistDelta delta)
+    public async Task PublishBlacklistDeltaAsync(DeltaList.Shared.Interfaces.BlacklistDelta delta)
     {
         if (_mqttClient == null || !_mqttClient.IsConnected)
         {
@@ -182,17 +206,37 @@ public class MqttBrokerClient : IHostedService
 
         try
         {
+            // Convert to Protobuf message
+            var protoDelta = new DeltaList.Shared.Messages.BlacklistDelta
+            {
+                DeltaId = delta.DeltaId,
+                SeqNo = delta.SeqNo,
+                TimestampUtc = delta.TimestampUtc,
+                Signature = delta.Signature,
+                ShardId = delta.ShardId
+            };
+            protoDelta.Added.AddRange(delta.Added);
+            protoDelta.Removed.AddRange(delta.Removed);
+
             // Serialize delta to Protobuf
-            var payload = delta.ToByteArray();
+            var payload = protoDelta.ToByteArray();
 
             // Publish to broadcast topic (all devices subscribe to this)
             var topic = "blacklist/delta";
 
+            var qosLevel = _settings.Mqtt.QoS switch
+            {
+                0 => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce,
+                1 => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce,
+                2 => MQTTnet.Protocol.MqttQualityOfServiceLevel.ExactlyOnce,
+                _ => MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce
+            };
+
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
                 .WithPayload(payload)
-                .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
-                .WithRetainFlag(true) // Retain last delta for offline devices
+                .WithQualityOfServiceLevel(qosLevel)
+                .WithRetainFlag(_settings.Mqtt.RetainBlacklistDeltas) // Retain last delta for offline devices
                 .Build();
 
             await _publishLock.WaitAsync();

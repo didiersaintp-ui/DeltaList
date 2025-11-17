@@ -5,6 +5,8 @@ using Grpc.Net.Client;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using GrpcDeviceSimulator.Authentication;
+using GrpcDeviceSimulator.Metrics;
 
 namespace GrpcDeviceSimulator;
 
@@ -14,6 +16,8 @@ public class DeviceSimulator
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, DeviceClient> _devices = new();
     private readonly Random _random = new();
+    private readonly AdvancedMetricsCollector _metricsCollector;
+    private readonly GrpcAuthClient? _authClient;
 
     // Metrics
     private long _totalBatchesSent = 0;
@@ -25,7 +29,17 @@ public class DeviceSimulator
     public DeviceSimulator(SimulatorOptions options)
     {
         _options = options;
+        _metricsCollector = new AdvancedMetricsCollector(_options.MetricsDirectory);
+
+        if (_options.UseAuthentication && !string.IsNullOrEmpty(_options.AuthServerUrl))
+        {
+            _authClient = new GrpcAuthClient(_options.AuthServerUrl, _options.UseAuthentication);
+            Log.Information("Authentication enabled with server: {AuthServer}", _options.AuthServerUrl);
+        }
     }
+
+    public GrpcAuthClient? AuthClient => _authClient;
+    public AdvancedMetricsCollector MetricsCollector => _metricsCollector;
 
     public async Task RunAsync()
     {
@@ -35,21 +49,28 @@ public class DeviceSimulator
         Log.Information("Duration: {Duration}s", _options.DurationSeconds);
         Log.Information("Batch interval: {Interval}s", _options.BatchIntervalSeconds);
         Log.Information("Events per batch: {Count}", _options.EventsPerBatch);
+        Log.Information("Test mode: {TestMode}", _options.TestMode);
+        Log.Information("Authentication: {Auth}", _options.UseAuthentication ? "Enabled" : "Disabled");
 
         var stopwatch = Stopwatch.StartNew();
 
-        // Start all device clients
+        // Start all device clients based on test mode
         var deviceTasks = new List<Task>();
-        for (int i = 0; i < _options.DeviceCount; i++)
+
+        switch (_options.TestMode.ToLower())
         {
-            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
-            var client = new DeviceClient(deviceId, _options, this);
-            _devices[deviceId] = client;
-
-            // Stagger device starts to avoid thundering herd
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
-
-            deviceTasks.Add(client.RunAsync(_cts.Token));
+            case "burst":
+                deviceTasks = await StartDevicesInBurstMode();
+                break;
+            case "staggered":
+                deviceTasks = await StartDevicesInStaggeredMode();
+                break;
+            case "stress":
+                deviceTasks = await StartDevicesInStressMode();
+                break;
+            default: // normal
+                deviceTasks = await StartDevicesNormalMode();
+                break;
         }
 
         // Start metrics reporter
@@ -88,6 +109,122 @@ public class DeviceSimulator
         Log.Information("Total reconnects: {Count}", _totalReconnects);
         Log.Information("Total errors: {Count}", _totalErrors);
         Log.Information("Avg throughput: {Rate:F2} events/sec", _totalEventsSent / stopwatch.Elapsed.TotalSeconds);
+
+        // Export advanced metrics
+        if (_options.ExportMetrics)
+        {
+            _metricsCollector.IncrementCounter("batches_sent", _totalBatchesSent);
+            _metricsCollector.IncrementCounter("events_sent", _totalEventsSent);
+            _metricsCollector.IncrementCounter("blacklist_deltas_received", _totalBlacklistDeltasReceived);
+            _metricsCollector.IncrementCounter("reconnects", _totalReconnects);
+            _metricsCollector.IncrementCounter("requests_failed", _totalErrors);
+            _metricsCollector.IncrementCounter("requests_total", _totalBatchesSent + _totalErrors);
+
+            _metricsCollector.PrintSummary();
+
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            await _metricsCollector.ExportToCsvAsync($"grpc_metrics_{timestamp}.csv");
+            await _metricsCollector.ExportRawLatenciesAsync($"grpc_latencies_{timestamp}.csv");
+        }
+    }
+
+    private async Task<List<Task>> StartDevicesNormalMode()
+    {
+        Log.Information("Starting devices in NORMAL mode");
+        var deviceTasks = new List<Task>();
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new DeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            // Stagger device starts to avoid thundering herd
+            await Task.Delay(TimeSpan.FromMilliseconds(_options.StaggerDelayMs));
+
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+        }
+
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInBurstMode()
+    {
+        Log.Information("Starting devices in BURST mode (all devices start simultaneously)");
+        var deviceTasks = new List<Task>();
+
+        // Create all clients first
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new DeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+        }
+
+        // Start all simultaneously
+        foreach (var client in _devices.Values)
+        {
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+        }
+
+        await Task.Delay(100); // Small delay to let tasks start
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInStaggeredMode()
+    {
+        Log.Information("Starting devices in STAGGERED mode (longer delays between starts)");
+        var deviceTasks = new List<Task>();
+        var delayMs = Math.Max(_options.StaggerDelayMs * 5, 500); // 5x normal delay, min 500ms
+
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new DeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+
+            await Task.Delay(TimeSpan.FromMilliseconds(delayMs));
+
+            if (i % 10 == 0 && i > 0)
+            {
+                Log.Information("Started {Count}/{Total} devices", i, _options.DeviceCount);
+            }
+        }
+
+        return deviceTasks;
+    }
+
+    private async Task<List<Task>> StartDevicesInStressMode()
+    {
+        Log.Information("Starting devices in STRESS mode (minimal delays, maximum load)");
+        var deviceTasks = new List<Task>();
+
+        // Reduce batch interval for stress mode
+        if (_options.BatchIntervalSeconds > 10)
+        {
+            Log.Warning("Batch interval adjusted to 5s for stress mode");
+        }
+
+        // Create and start all clients with minimal delay
+        for (int i = 0; i < _options.DeviceCount; i++)
+        {
+            var deviceId = $"{_options.DeviceIdPrefix}-{i:D6}";
+            var client = new DeviceClient(deviceId, _options, this);
+            _devices[deviceId] = client;
+
+            deviceTasks.Add(client.RunAsync(_cts.Token));
+
+            // Very minimal delay
+            if (i % 100 == 0)
+            {
+                await Task.Delay(10);
+            }
+        }
+
+        await Task.Delay(100);
+        return deviceTasks;
     }
 
     private async Task ReportMetricsAsync(CancellationToken ct)
@@ -177,6 +314,17 @@ public class DeviceClient
 
     private async Task ConnectAndStreamAsync(CancellationToken ct)
     {
+        // Get auth token if authentication is enabled
+        string? authToken = null;
+        if (_simulator.AuthClient != null)
+        {
+            authToken = await _simulator.AuthClient.RegisterAndGetTokenAsync(_deviceId, ct);
+            if (authToken == null && _options.UseAuthentication)
+            {
+                Log.Warning("Device {DeviceId} failed to authenticate, continuing without token", _deviceId);
+            }
+        }
+
         // Create gRPC channel
         var channelOptions = new GrpcChannelOptions
         {
@@ -189,11 +337,16 @@ public class DeviceClient
         using var channel = GrpcChannel.ForAddress(address, channelOptions);
         var client = new DeviceStreamService.DeviceStreamServiceClient(channel);
 
-        // Create metadata with device ID
+        // Create metadata with device ID and auth token
         var metadata = new Metadata
         {
             { "device-id", _deviceId }
         };
+
+        if (!string.IsNullOrEmpty(authToken))
+        {
+            metadata.Add("authorization", $"Bearer {authToken}");
+        }
 
         using var call = client.Connect(metadata, cancellationToken: ct);
 
@@ -257,6 +410,9 @@ public class DeviceClient
                 // Wait for batch interval
                 await Task.Delay(TimeSpan.FromSeconds(_options.BatchIntervalSeconds), ct);
 
+                // Measure latency
+                var sw = Stopwatch.StartNew();
+
                 // Simulate network latency
                 var latency = _simulator.GetSimulatedLatency();
                 if (latency > 0)
@@ -276,11 +432,15 @@ public class DeviceClient
 
                 await stream.WriteAsync(message, ct);
 
+                sw.Stop();
+                _simulator.MetricsCollector.RecordLatency(sw.Elapsed.TotalMilliseconds);
+
                 _simulator.IncrementBatchesSent();
                 _simulator.IncrementEventsSent(batch.Events.Count);
 
                 if (_options.Verbose)
-                    Log.Debug("Device {DeviceId} sent batch {BatchSeq}", _deviceId, batch.BatchSeq);
+                    Log.Debug("Device {DeviceId} sent batch {BatchSeq} in {Latency:F2}ms",
+                        _deviceId, batch.BatchSeq, sw.Elapsed.TotalMilliseconds);
 
                 // Simulate random reconnection
                 if (_simulator.ShouldReconnect())

@@ -39,4 +39,25 @@ public class SimulatorOptions
 
     [Option('v', "verbose", Required = false, Default = false, HelpText = "Verbose logging")]
     public bool Verbose { get; set; } = false;
+
+    // Authentication options
+    [Option("auth-server", Required = false, Default = "", HelpText = "Authentication server URL (empty = no auth)")]
+    public string AuthServerUrl { get; set; } = "";
+
+    [Option("use-auth", Required = false, Default = false, HelpText = "Enable authentication")]
+    public bool UseAuthentication { get; set; } = false;
+
+    // Test modes
+    [Option("test-mode", Required = false, Default = "normal", HelpText = "Test mode: normal, burst, staggered, stress")]
+    public string TestMode { get; set; } = "normal";
+
+    [Option("stagger-delay-ms", Required = false, Default = 100, HelpText = "Delay between device starts in staggered mode (ms)")]
+    public int StaggerDelayMs { get; set; } = 100;
+
+    // Metrics options
+    [Option("export-metrics", Required = false, Default = false, HelpText = "Export metrics to CSV")]
+    public bool ExportMetrics { get; set; } = false;
+
+    [Option("metrics-dir", Required = false, Default = "metrics", HelpText = "Directory for metrics export")]
+    public string MetricsDirectory { get; set; } = "metrics";
 }

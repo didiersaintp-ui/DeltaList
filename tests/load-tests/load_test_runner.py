@@ -9,6 +9,7 @@ import time
 import argparse
 import signal
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -163,16 +164,62 @@ class LoadTestRunner:
         sys.exit(0)
 
     def _print_summary(self):
-        """Print test summary"""
+        """Print test summary and export results"""
         if self.start_time:
             duration = (datetime.now() - self.start_time).total_seconds()
+            expected_batches = self.args.total_devices * (duration // self.args.batch_interval)
+            expected_events = expected_batches * self.args.events_per_batch
+
+            summary = {
+                "test_type": self.args.poc_type,
+                "start_time": self.start_time.isoformat(),
+                "end_time": datetime.now().isoformat(),
+                "duration_seconds": duration,
+                "configuration": {
+                    "total_devices": self.args.total_devices,
+                    "simulators": self.args.simulators,
+                    "batch_interval": self.args.batch_interval,
+                    "events_per_batch": self.args.events_per_batch,
+                    "latency_ms": self.args.latency_ms,
+                    "packet_loss": self.args.packet_loss,
+                },
+                "expected_metrics": {
+                    "batches": expected_batches,
+                    "events": expected_events,
+                },
+                "log_files": [str(p['log_file']) for p in self.processes]
+            }
+
+            # Print summary
             print(f"\n========== Test Summary ==========")
             print(f"Duration: {duration:.2f}s")
             print(f"Total devices: {self.args.total_devices}")
-            print(f"Expected batches: {self.args.total_devices * (duration // self.args.batch_interval):.0f}")
-            print(f"Expected events: {self.args.total_devices * (duration // self.args.batch_interval) * self.args.events_per_batch:.0f}")
+            print(f"Expected batches: {expected_batches:.0f}")
+            print(f"Expected events: {expected_events:.0f}")
             print(f"\nLog files saved in: logs/")
+
+            # Export to JSON
+            results_dir = Path("test_results")
+            results_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            results_file = results_dir / f"{self.args.poc_type}_load_test_{timestamp}.json"
+
+            with open(results_file, 'w') as f:
+                json.dump(summary, f, indent=2)
+
+            print(f"Results exported to: {results_file}")
             print(f"==================================\n")
+
+            # Generate graphs if matplotlib is available
+            try:
+                from generate_graphs import generate_load_test_graphs
+                print("Generating graphs...")
+                generate_load_test_graphs(str(results_file))
+                print("Graphs generated successfully!")
+            except ImportError:
+                print("matplotlib not installed, skipping graph generation")
+            except Exception as e:
+                print(f"Graph generation failed: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='DeltaList Load Test Runner')

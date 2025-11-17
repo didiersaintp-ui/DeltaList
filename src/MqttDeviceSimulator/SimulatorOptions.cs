@@ -45,4 +45,36 @@ public class SimulatorOptions
 
     [Option('v', "verbose", Required = false, Default = false, HelpText = "Verbose logging")]
     public bool Verbose { get; set; } = false;
+
+    // Authentication options
+    [Option("auth-server", Required = false, Default = "", HelpText = "Authentication server URL (empty = no auth)")]
+    public string AuthServerUrl { get; set; } = "";
+
+    [Option("use-auth", Required = false, Default = false, HelpText = "Enable JWT authentication")]
+    public bool UseAuthentication { get; set; } = false;
+
+    // QoS options
+    [Option("qos", Required = false, Default = 1, HelpText = "MQTT QoS level (0, 1, or 2)")]
+    public int QosLevel { get; set; } = 1;
+
+    // Test modes
+    [Option("test-mode", Required = false, Default = "normal", HelpText = "Test mode: normal, burst, staggered, stress")]
+    public string TestMode { get; set; } = "normal";
+
+    [Option("stagger-delay-ms", Required = false, Default = 100, HelpText = "Delay between device starts in staggered mode (ms)")]
+    public int StaggerDelayMs { get; set; } = 100;
+
+    // Metrics options
+    [Option("export-metrics", Required = false, Default = false, HelpText = "Export metrics to CSV")]
+    public bool ExportMetrics { get; set; } = false;
+
+    [Option("metrics-dir", Required = false, Default = "metrics", HelpText = "Directory for metrics export")]
+    public string MetricsDirectory { get; set; } = "metrics";
+
+    // Reconnection options
+    [Option("max-retry", Required = false, Default = 5, HelpText = "Maximum reconnection retries")]
+    public int MaxReconnectRetries { get; set; } = 5;
+
+    [Option("exponential-backoff", Required = false, Default = true, HelpText = "Use exponential backoff for reconnections")]
+    public bool UseExponentialBackoff { get; set; } = true;
 }

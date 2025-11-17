@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using Serilog;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -59,11 +60,38 @@ builder.Services.AddStackExchangeRedisCache(options =>
 
 // Add singleton services
 builder.Services.AddSingleton(backendSettings);
+
+// Security services
 builder.Services.AddSingleton(new PanTokenizer(
     backendSettings.Security.SecretKey,
     backendSettings.Security.Salt));
+builder.Services.AddSingleton<DeltaList.Shared.Security.IJwtTokenService>(sp =>
+    new DeltaList.Shared.Security.JwtTokenService(
+        backendSettings.Security.SecretKey,
+        backendSettings.Security.JwtIssuer,
+        backendSettings.Security.JwtAudience));
+
+// Device registry
+builder.Services.AddSingleton<DeltaList.Shared.Interfaces.IDeviceRegistry, DeltaList.Shared.Interfaces.InMemoryDeviceRegistry>();
+
+// Rate limiting
+builder.Services.AddSingleton<IRateLimiter>(sp =>
+    new TokenBucketRateLimiter(
+        maxTokens: 60, // Allow 60 batches per minute
+        refillRatePerMinute: 60));
+
+// Metrics
 builder.Services.AddSingleton(new MetricsCollector("GrpcBackend"));
-builder.Services.AddSingleton<IEventStore, InMemoryEventStore>();
+
+// Storage - Event Store (with Azure fallback)
+builder.Services.AddSingleton<IEventStore>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<AzureBlobEventStore>>();
+    var fallbackLogger = sp.GetRequiredService<ILogger<InMemoryEventStore>>();
+    return new AzureBlobEventStore(logger, backendSettings, fallbackLogger);
+});
+
+// Blacklist Manager (with Azure persistence)
 builder.Services.AddSingleton<IBlacklistManager, BlacklistManager>();
 
 // Add OpenTelemetry
@@ -91,6 +119,7 @@ if (blacklistManager is BlacklistManager bm)
 app.UseSerilogRequestLogging();
 
 // Map gRPC services
+app.MapGrpcService<DeviceAuthServiceImpl>();
 app.MapGrpcService<DeviceStreamServiceImpl>();
 app.MapGrpcService<BlacklistAdminServiceImpl>();
 
