@@ -40,36 +40,23 @@ RUN dotnet restore "src/MqttBackend/MqttBackend.csproj"
 # Copy all source files
 COPY . .
 
-# Build project
+# Build and publish in single step
 WORKDIR "/src/src/MqttBackend"
-RUN dotnet build "MqttBackend.csproj" \
-    -c ${BUILD_CONFIGURATION} \
-    -o /app/build \
-    --no-restore
-
-# ============================================
-# Stage 3: Publish
-# ============================================
-FROM build AS publish
-
-ARG BUILD_CONFIGURATION=Release
-
 RUN dotnet publish "MqttBackend.csproj" \
     -c ${BUILD_CONFIGURATION} \
     -o /app/publish \
-    --no-build \
     --no-restore \
     /p:UseAppHost=false
 
 # ============================================
-# Stage 4: Final runtime image
+# Stage 3: Final runtime image
 # ============================================
 FROM base AS final
 
 WORKDIR /app
 
-# Copy published files
-COPY --from=publish --chown=appuser:appgroup /app/publish .
+# Copy published files from build stage
+COPY --from=build --chown=appuser:appgroup /app/publish .
 
 # Switch to non-root user
 USER appuser
